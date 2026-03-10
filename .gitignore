@@ -1,0 +1,14 @@
+# 小说内容（不上传）
+novels/*/
+# 但保留模板目录
+!novels/.模板/
+!novels/.模板/**
+
+# macOS
+.DS_Store
+
+# 编辑器
+.vscode/
+.idea/
+*.swp
+*.swo
