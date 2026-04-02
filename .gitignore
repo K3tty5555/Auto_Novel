@@ -4,6 +4,9 @@ novels/*/
 !novels/.模板/
 !novels/.模板/**
 
+# 生成的封面图（中间产物）
+cover-image/
+
 # macOS
 .DS_Store
 
