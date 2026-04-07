@@ -41,6 +41,14 @@ metadata:
 - 脚本：`.claude/skills/novel-publish/scripts/fanqie-publish.ts`
 - 运行方式：`bun fanqie-publish.ts`
 
+脚本内置的自动处理机制（无需人工干预）：
+- 序号/标题：CDP 鼠标点击 + `Input.insertText`，确保 React 状态正确更新
+- 正文粘贴：DataTransfer ClipboardEvent，React 富文本编辑器原生支持
+- 弹框处理：自动检测并点击「知道了」「放弃」，防止保存到旧草稿
+- 重定向检测：落地 URL 含草稿 ID 时先导航首页再重新打开，防止内容写入旧草稿
+- URL 碰撞检测：脚本自动比对本次与上次的 URL，碰撞则抛错触发重试
+- 草稿释放：保存后导航到首页再关闭标签页，告知服务器当前草稿已完成
+
 ---
 
 ## Phase 1：解析参数，找到章节文件
@@ -78,31 +86,42 @@ metadata:
 
 ---
 
-## Phase 3：逐章调用 CDP 脚本
+## Phase 3：逐章调用 CDP 脚本（带自动重试）
 
-对每章执行：
+脚本路径：`.claude/skills/novel-publish/scripts/`
+
+对每章最多尝试 **2次**，失败则记录并继续下一章：
 
 ```bash
-cd .claude/skills/novel-publish/scripts
-bun fanqie-publish.ts \
-  --md-file "novels/[小说名]/chapters/ch{NNN}_{标题}.md" \
-  --time "[HH:MM]" \
-  --date "[YYYY-MM-DD]"
+SCRIPT_DIR=".claude/skills/novel-publish/scripts"
+DATE=$(date +%Y-%m-%d)
+
+for ch_file in [按章节号升序的文件列表]; do
+  success=false
+  for attempt in 1 2; do
+    if bun "$SCRIPT_DIR/fanqie-publish.ts" \
+         --md-file "$ch_file" \
+         --time "[HH:MM]" \
+         --date "$DATE"; then
+      success=true
+      break
+    fi
+    echo "[retry] ch$(basename $ch_file) attempt $attempt failed, waiting 8s..."
+    sleep 8
+  done
+
+  if [ "$success" = false ]; then
+    echo "[FAILED] $(basename $ch_file)"
+  fi
+
+  # 章节间间隔，让服务器充分释放草稿状态
+  sleep 5
+done
 ```
 
-脚本会自动：
-1. 清洗 Markdown 格式（去掉 `---`、`**`、`> ` 等）
-2. 连接 / 启动 Chrome（fanqie 专用 profile）
-3. 打开番茄小说发布页（新标签页）
-4. 填入标题、粘贴正文、设定时、存草稿
-5. 关闭标签页
-
-**首次运行**：Chrome 会打开番茄小说页面，如果未登录，手动登录后脚本会自动继续（或重新运行）。
-
-**如果 bun 未安装**，使用：
-```bash
-npx -y bun fanqie-publish.ts ...
-```
+**脚本退出码：**
+- `0` = 成功（草稿已保存，URL 唯一）
+- `1` = 失败（URL 碰撞、表单填充失败、存草稿按钮未找到等）
 
 ---
 
@@ -113,29 +132,32 @@ npx -y bun fanqie-publish.ts ...
 ═══════════════════════════════
 
 小说：[小说名]
-发布章节：[N] 章
+发布章节：[N] 章（成功 M / 失败 F）
 
 章节清单：
-✓ 第48章 宋缺的剑 → 草稿已保存，定时 16:00
-✓ 第49章 ...      → 草稿已保存，定时 16:00
+✓ 第48章 宋缺的剑   → 草稿已保存，定时 16:00
+✓ 第49章 出门       → 草稿已保存，定时 16:00
+✗ 第50章 旧铁上的字 → 失败（重试2次后放弃），需手动上传
 ...
 
-请在番茄小说后台确认草稿状态后发布。
+请在番茄小说草稿箱确认后发布。
+如有失败章节，手动上传或重新运行：/novel-publish [小说名] ch050
 ```
-
-如果某章失败，标注 ✗ 并说明原因。
 
 ---
 
 ## 故障处理
 
-| 问题 | 处理方式 |
-|------|---------|
-| 未登录 | Chrome 窗口打开后手动登录，然后重新运行 |
-| bun 未安装 | 用 `npx -y bun` 替代 |
-| 找不到文件 | 检查章节号和文件名格式 |
-| 脚本报错 | 截图并告知用户具体错误信息 |
-| 定时设置失败 | 脚本会继续存草稿，提醒用户手动设置定时 |
+| 问题 | 脚本行为 | 操作建议 |
+|------|----------|---------|
+| 未登录 | 等待 inputs 超时，退出码 1 | Chrome 窗口手动登录后重新运行 |
+| bun 未安装 | 命令未找到 | `npm install -g bun` |
+| 找不到章节文件 | Phase 1 报错，提前终止 | 检查章节号和文件名格式 |
+| URL 碰撞 | 自动抛错，触发重试 | 通常重试可解决 |
+| 弹框（知道了/放弃） | 自动处理 | 无需操作 |
+| 服务端重定向旧草稿 | 自动检测并重新导航 | 无需操作 |
+| 序号/标题为空 | 已用 CDP 点击+insertText 修复 | 若仍出现，截图反馈 |
+| 存草稿按钮未找到 | 抛错，触发重试 | 通常重试可解决 |
 
 ---
 
