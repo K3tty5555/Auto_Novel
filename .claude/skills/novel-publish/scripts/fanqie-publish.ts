@@ -390,7 +390,7 @@ async function publishChapter(opts: {
     // 番茄小说发布页有两个字段：章节序号（阿拉伯数字）+ 标题文本
     // 使用 CDP 鼠标点击 + Input.insertText（真实浏览器级输入），避免 React 异步重渲染清空值。
     console.log(`[fanqie] Waiting for inputs (序号 + 标题)...`);
-    const inputsReady = await waitFor(cdp, sessionId, `document.querySelectorAll('input').length >= 1`, 20_000);
+    const inputsReady = await waitFor(cdp, sessionId, `document.querySelectorAll('input').length >= 1`, 90_000);
     if (!inputsReady) throw new Error('Inputs not found — are you logged in to 番茄小说?');
 
     /** CDP-click an input to give it real browser-level focus, then fill via execCommand.
