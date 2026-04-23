@@ -90,11 +90,22 @@ metadata:
 
 脚本路径：`.claude/skills/novel-publish/scripts/`
 
+**3.0 读取 Book ID**
+
+从 `novels/[小说名]/发布信息.md` 提取番茄小说 Book ID：
+```bash
+BOOK_ID=$(grep -oE '番茄小说 Book ID：[0-9]+' "novels/[小说名]/发布信息.md" | grep -oE '[0-9]+$' || echo "")
+```
+若为空则不传 `--book-id`（脚本使用默认值）。
+
 对每章最多尝试 **2次**，失败则记录并继续下一章：
 
 ```bash
 SCRIPT_DIR=".claude/skills/novel-publish/scripts"
 DATE=$(date +%Y-%m-%d)
+BOOK_ID=$(grep -oE '番茄小说 Book ID：[0-9]+' "novels/[小说名]/发布信息.md" | grep -oE '[0-9]+$' || echo "")
+BOOK_ID_ARG=""
+[ -n "$BOOK_ID" ] && BOOK_ID_ARG="--book-id $BOOK_ID"
 
 for ch_file in [按章节号升序的文件列表]; do
   success=false
@@ -102,7 +113,8 @@ for ch_file in [按章节号升序的文件列表]; do
     if bun "$SCRIPT_DIR/fanqie-publish.ts" \
          --md-file "$ch_file" \
          --time "[HH:MM]" \
-         --date "$DATE"; then
+         --date "$DATE" \
+         $BOOK_ID_ARG; then
       success=true
       break
     fi

@@ -28,8 +28,8 @@ import {
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const BOOK_ID = '7615507515849067544';
-const PUBLISH_URL = `https://fanqienovel.com/main/writer/${BOOK_ID}/publish/?enter_from=newchapter_0`;
+let BOOK_ID = '7615507515849067544';
+let PUBLISH_URL = `https://fanqienovel.com/main/writer/${BOOK_ID}/publish/?enter_from=newchapter_0`;
 
 const CHROME_CANDIDATES = {
   darwin: [
@@ -857,6 +857,10 @@ async function main(): Promise<void> {
     else if (arg === '--title' && args[i + 1]) titleOverride = args[++i]!;
     else if (arg === '--time' && args[i + 1]) time = args[++i]!;
     else if (arg === '--date' && args[i + 1]) date = args[++i]!;
+    else if (arg === '--book-id' && args[i + 1]) {
+      BOOK_ID = args[++i]!;
+      PUBLISH_URL = `https://fanqienovel.com/main/writer/${BOOK_ID}/publish/?enter_from=newchapter_0`;
+    }
   }
 
   if (!mdFile) {
