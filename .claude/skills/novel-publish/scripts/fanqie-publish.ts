@@ -113,11 +113,9 @@ function copyToClipboard(text: string): void {
 
 function pasteToChrome(): boolean {
   if (process.platform !== 'darwin') return false;
+  // No `activate` — avoids bringing Chrome to the foreground.
+  // Sends Cmd+V only if Chrome already has OS focus (last-resort fallback).
   const script = `
-    tell application "Google Chrome"
-      activate
-    end tell
-    delay 0.5
     tell application "System Events"
       keystroke "a" using command down
       delay 0.2
@@ -229,6 +227,7 @@ function launchChromeViaBash(chromePath: string, profileDir: string, port: numbe
     `  '--user-data-dir=${profileDir}' \\`,
     `  --no-first-run \\`,
     `  --no-default-browser-check \\`,
+    `  --start-minimized \\`,
     `  'https://fanqienovel.com/main/writer/home' \\`,
     `  >/tmp/fanqie-chrome.log 2>&1 &`,
   ].join('\n');
@@ -510,43 +509,25 @@ async function publishChapter(opts: {
       `(document.activeElement?.tagName ?? 'none') + '/' + (document.activeElement?.contentEditable ?? 'none') + '/' + (document.activeElement?.closest('div[contenteditable="true"]') ? 'in-editor' : 'outside')`);
     console.log(`[fanqie] Active element: ${activeTag}`);
 
-    // Step 5: 主方法 — 系统剪贴板 + osascript Cmd+V（macOS 上最可靠，完整触发浏览器事件链）
-    console.log(`[fanqie] Copying content to clipboard and pasting (${content.length} chars)...`);
-    copyToClipboard(content);
-    await sleep(300);
+    // Step 5: 主方法 — DataTransfer paste 事件（纯 JS，不需要窗口焦点，不打断用户操作）
+    console.log(`[fanqie] Pasting via DataTransfer (${content.length} chars)...`);
+    let pasteResult = await evalVal<number>(cdp, sessionId, `(() => {
+      const ed = document.querySelector('div[contenteditable="true"]');
+      if (!ed) return -1;
+      ed.focus();
+      try {
+        const dt = new DataTransfer();
+        dt.setData('text/plain', ${JSON.stringify(content)});
+        const pasteEvt = new ClipboardEvent('paste', { bubbles: true, cancelable: true, clipboardData: dt });
+        ed.dispatchEvent(pasteEvt);
+      } catch(e) { return -2; }
+      return ed.innerText?.length ?? 0;
+    })()`);
+    console.log(`[fanqie] After DataTransfer paste: ${pasteResult} chars`);
 
-    let pasteResult = -1;
-    const osaPasted = pasteToChrome();
-    if (osaPasted) {
-      console.log('[fanqie] Pasted via osascript (Cmd+V)');
-      await sleep(2000);
-      pasteResult = await evalVal<number>(cdp, sessionId,
-        `document.querySelector('div[contenteditable="true"]')?.innerText?.length ?? 0`);
-      console.log(`[fanqie] After osascript paste: ${pasteResult} chars`);
-    }
-
-    // Step 5b: 降级 — DataTransfer paste 事件
+    // Step 5b: 降级 — Input.insertText（CDP 直接注入，同样不需要窗口焦点）
     if (pasteResult < 100) {
-      console.log('[fanqie] Falling back to DataTransfer paste event...');
-      pasteResult = await evalVal<number>(cdp, sessionId, `(() => {
-        const ed = document.querySelector('div[contenteditable="true"]');
-        if (!ed) return -1;
-        ed.focus();
-        try {
-          const dt = new DataTransfer();
-          dt.setData('text/plain', ${JSON.stringify(content)});
-          const pasteEvt = new ClipboardEvent('paste', { bubbles: true, cancelable: true, clipboardData: dt });
-          ed.dispatchEvent(pasteEvt);
-        } catch(e) { return -2; }
-        return ed.innerText?.length ?? 0;
-      })()`);
-      console.log(`[fanqie] After DataTransfer paste: ${pasteResult} chars`);
-    }
-
-    // Step 6: 如果前两种都无效，降级用 Input.insertText
-    if (pasteResult < 100) {
-      console.log('[fanqie] Paste event ineffective, fallback to Input.insertText...');
-      // 确保编辑区聚焦
+      console.log('[fanqie] DataTransfer ineffective, fallback to Input.insertText...');
       await cdp.send('Runtime.evaluate', {
         expression: `document.querySelector('div[contenteditable="true"]')?.focus()`,
       }, { sessionId });
@@ -557,6 +538,23 @@ async function publishChapter(opts: {
         await sleep(50);
       }
       await sleep(500);
+      pasteResult = await evalVal<number>(cdp, sessionId,
+        `document.querySelector('div[contenteditable="true"]')?.innerText?.length ?? 0`);
+      console.log(`[fanqie] After Input.insertText: ${pasteResult} chars`);
+    }
+
+    // Step 5c: 最后兜底 — osascript Cmd+V（会把 Chrome 带到前台，尽量避免走到这里）
+    if (pasteResult < 100) {
+      console.log('[fanqie] Falling back to osascript Cmd+V (last resort)...');
+      copyToClipboard(content);
+      await sleep(300);
+      const osaPasted = pasteToChrome();
+      if (osaPasted) {
+        await sleep(2000);
+        pasteResult = await evalVal<number>(cdp, sessionId,
+          `document.querySelector('div[contenteditable="true"]')?.innerText?.length ?? 0`);
+        console.log(`[fanqie] After osascript paste: ${pasteResult} chars`);
+      }
     }
 
     const contentLen = await evalVal<number>(cdp, sessionId,
